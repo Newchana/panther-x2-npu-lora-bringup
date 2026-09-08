@@ -7,9 +7,12 @@
 | 项 | 值 |
 | --- | --- |
 | 设备 | Panther X2 / 黑豹X2（Helium 矿机版），Rockchip RK3566, 4GB RAM, eMMC+TF |
+| 固件 | **`Armbian_24.8.0_rockchip_panther-x2_bullseye_6.1.57_server_2024.07.09.img`** |
 | 系统 | Armbian-unofficial 24.8.0-trunk bullseye, 内核 `6.1.57-rk35xx-hiasia` |
 | DT | `rk3566-panther-x2.dtb`（`/boot/dtb/rockchip/`），boot 方式 `fdtfile=rockchip/rk3566-panther-x2.dtb` |
 | SSH | root@192.168.2.120 |
+
+> 本仓库所有改动均基于上述 `.img` 固件验证/记录。
 
 ## 2. 成果摘要
 
@@ -52,12 +55,37 @@
 │   ├── reset_lgw.sh       HAL 使用的复位脚本（GPIO120/129）
 │   ├── reset_good.sh      复位脚本纯文件备份
 │   └── sht_read.py        SHT2x 温湿度读取脚本（i2c-2 / 0x40）
+├── system/
+│   ├── led-fix.sh           LED 灯行为开机自启脚本（eth/wifi 跟随链路、status 心跳）
+│   └── led-fix.service      对应 systemd 单元
 └── dtb/
     ├── dtb-original-st7789v-m1.dtb    出厂原始 dtb（备份，spi3=m1 + st7789v 屏）
     ├── dtb-spi3-m0-cs0-spidev.dtb     ① spi3→m0 + spidev@0（LoRa 可访问）
     ├── dtb-final-spi3-m0+i2c2-m1.dtb  ② 最终：① + i2c2→m1 启用（SHT2x 可用）
     ├── patch_spi3_m0cs0.py            dtb 补丁脚本（decompile→改 dts→dtc）
     └── patch_enable_i2c2_m1.py        i2c2 使能 + m1 引脚补丁脚本
+```
+
+## 3.5 LED 灯行为修正（板载 4 颗灯）
+
+出厂 DTB 的 `gpio-leds` 定义了 4 颗灯，其中 **led-eth / led-wifi 默认 `default-state = "on"`（被强制常亮）**，导致"网线没插网口灯也亮、WiFi 没连灯也亮"。
+
+| 面板灯 | 出厂行为 | 修正后行为 | 触发器 |
+| --- | --- | --- | --- |
+| led-pwr（电源） | 常亮 | 常亮 | none |
+| led-status（状态） | 规律呼吸 | 规律呼吸（系统正常指示） | `heartbeat` |
+| led-eth（网口） | **强制常亮** | **插网线亮、拔线灭** | `netdev` + eth0 |
+| led-wifi（WiFi） | **强制常亮** | **连上 AP 亮、断开灭** | `netdev` + wlan0 |
+
+> 注：系统里的 `mmc0::` 是 eMMC 控制器的活动指示，**未接任何实体 GPIO**，面板上没有独立的"硬盘灯"。
+
+修正通过开机自启脚本实现（`/usr/local/sbin/led-fix.sh` + systemd 服务 `led-fix.service`），**重启自动生效**，无需改 dtb。
+
+```bash
+# 安装/启用（设备上）
+cp system/led-fix.sh /usr/local/sbin/led-fix.sh && chmod +x /usr/local/sbin/led-fix.sh
+cp system/led-fix.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now led-fix.service
 ```
 
 ## 4. 复现步骤
